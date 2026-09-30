@@ -35,6 +35,14 @@ Item {
   property var dnsServers: []
   property string dnsMode: "off"
   property bool tailscaleAllowlisted: false
+  property string publicIp: ""
+  property bool publicIpLoading: false
+  property bool tailscaleConnected: false
+  property string tailscaleState: ""
+  property string tailscaleHostname: ""
+  property string tailscaleDnsName: ""
+  property string tailscaleIp: ""
+  property var tailscaleIps: []
   property string _statusOutput: ""
   property string _countriesOutput: ""
   property string _settingsOutput: ""
@@ -65,6 +73,24 @@ Item {
     if (city !== "" && country !== "") return city + ", " + country
     return country || server || ""
   }
+  readonly property string publicIpText: publicIpLoading && publicIp === ""
+    ? "Checking…"
+    : (publicIp !== "" ? publicIp : "Unavailable")
+  readonly property string tailscaleSummary: Model.tailscaleSummary({
+    connected: tailscaleConnected,
+    state: tailscaleState,
+    hostname: tailscaleHostname,
+    dnsName: tailscaleDnsName,
+    ip: tailscaleIp
+  })
+  readonly property string tailscaleDetailText: {
+    if (!tailscaleConnected) return ""
+    var parts = []
+    if (tailscaleDnsName !== "" && tailscaleDnsName !== tailscaleHostname)
+      parts.push(tailscaleDnsName)
+    if (tailscaleIps.length > 1) parts.push(tailscaleIps.join(", "))
+    return parts.join(" · ")
+  }
 
   function setting(name, fallback) {
     var value = settings ? settings[name] : undefined
@@ -80,6 +106,28 @@ Item {
   function refresh() {
     if (!statusProcess.running) statusProcess.running = true
     if (!countriesLoaded && !countriesProcess.running) countriesProcess.running = true
+    root.refreshPublicIp()
+    root.refreshTailscale()
+  }
+
+  function refreshPublicIp() {
+    if (publicIpProcess.running) return
+    root.publicIpLoading = true
+    publicIpProcess.running = true
+  }
+
+  function refreshTailscale() {
+    if (tailscaleProcess.running) return
+    tailscaleProcess.running = true
+  }
+
+  function clearTailscaleInfo() {
+    root.tailscaleConnected = false
+    root.tailscaleState = "Stopped"
+    root.tailscaleHostname = ""
+    root.tailscaleDnsName = ""
+    root.tailscaleIp = ""
+    root.tailscaleIps = []
   }
 
   function refreshSettings() {
@@ -284,6 +332,45 @@ Item {
         root.server = ""
         root.ip = ""
       }
+    }
+  }
+
+  Process {
+    id: publicIpProcess
+    command: ["curl", "-4", "-fsS", "--max-time", "3", "https://api.ipify.org"]
+    stdout: StdioCollector { id: publicIpStdout; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      root.publicIpLoading = false
+      if (exitCode === 0) {
+        var parsed = Model.parsePublicIp(publicIpStdout.text || "")
+        if (parsed !== "") root.publicIp = parsed
+      }
+    }
+  }
+
+  Process {
+    id: tailscaleProcess
+    command: ["tailscale", "status", "--json"]
+    stdout: StdioCollector { id: tailscaleStdout; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.clearTailscaleInfo()
+        return
+      }
+      var parsed = Model.parseTailscaleStatus(tailscaleStdout.text || "")
+      if (!parsed.ok) {
+        root.clearTailscaleInfo()
+        root.tailscaleState = "Unavailable"
+        return
+      }
+      root.tailscaleConnected = parsed.connected
+      root.tailscaleState = parsed.state
+      root.tailscaleHostname = parsed.hostname
+      root.tailscaleDnsName = parsed.dnsName
+      root.tailscaleIp = parsed.ip
+      root.tailscaleIps = parsed.ips
     }
   }
 

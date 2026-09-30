@@ -11,6 +11,7 @@ Repository: https://github.com/shawk08033/Omarchy-VPN-Nord
 - Toggle auto-connect (reconnect on OS startup), with an optional preferred country
 - Set DNS: Off, Cloudflare, Google, or up to three custom IPv4 servers
 - Keep Tailscale connected at the same time (allowlists `100.64.0.0/10` and UDP `41641`)
+- Show current public IP and Tailscale hostname/IP when Tailscale is connected
 
 ## Requirements
 

@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "shaunhawk.nordvpn",
   "name": "NordVPN",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Shaun Hawk <shaun@shaunhawk.com>",
   "license": "MIT",
-  "description": "Control NordVPN from the Omarchy bar: connect, switch servers, auto-connect, custom DNS, and Tailscale coexistence.",
+  "description": "Control NordVPN from the Omarchy bar: connect, switch servers, auto-connect, custom DNS, Tailscale coexistence, and live IP status.",
   "kinds": ["bar-widget"],
   "entryPoints": {
     "barWidget": "Panel.qml"

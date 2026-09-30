@@ -166,3 +166,77 @@ function elide(text) {
   var value = String(text || "").replace(/\s+/g, " ").trim()
   return value.length > 140 ? value.substring(0, 137) + "…" : value
 }
+
+function parsePublicIp(raw) {
+  var value = String(raw || "").replace(/\s+/g, "").trim()
+  if (isIpv4(value)) return value
+  // Accept a bare IPv6 address without validating every form.
+  if (/^[0-9a-f:]+$/i.test(value) && value.indexOf(":") !== -1) return value
+  return ""
+}
+
+function cleanDnsName(name) {
+  return String(name || "").replace(/\.$/, "").trim()
+}
+
+function parseTailscaleStatus(raw) {
+  var text = String(raw || "").trim()
+  if (text === "") {
+    return {
+      ok: true,
+      connected: false,
+      state: "Stopped",
+      hostname: "",
+      dnsName: "",
+      ip: "",
+      ips: []
+    }
+  }
+  try {
+    var data = JSON.parse(text)
+    var backendState = String(data.BackendState || "Unknown")
+    var self = data.Self || {}
+    var ips = []
+    var source = self.TailscaleIPs || data.TailscaleIPs || []
+    for (var i = 0; i < source.length; i++) {
+      var ip = String(source[i] || "").trim()
+      if (ip !== "" && ips.indexOf(ip) < 0) ips.push(ip)
+    }
+    var hostname = String(self.HostName || "").trim()
+    var dnsName = cleanDnsName(self.DNSName)
+    var connected = backendState === "Running"
+    return {
+      ok: true,
+      connected: connected,
+      state: backendState,
+      hostname: hostname,
+      dnsName: dnsName,
+      ip: ips.length > 0 ? ips[0] : "",
+      ips: ips
+    }
+  } catch (e) {
+    return {
+      ok: false,
+      connected: false,
+      state: "Unavailable",
+      hostname: "",
+      dnsName: "",
+      ip: "",
+      ips: []
+    }
+  }
+}
+
+function tailscaleSummary(info) {
+  if (!info || !info.connected) {
+    var state = info && info.state ? String(info.state) : "Stopped"
+    if (state === "NeedsLogin") return "Needs login"
+    if (state === "Stopped" || state === "") return "Not connected"
+    return state
+  }
+  var parts = []
+  if (info.hostname) parts.push(info.hostname)
+  if (info.ip) parts.push(info.ip)
+  else if (info.dnsName) parts.push(info.dnsName)
+  return parts.length > 0 ? parts.join(" · ") : "Connected"
+}

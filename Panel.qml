@@ -80,7 +80,12 @@ Panel {
     bar: root.bar
     text: "󰦝"
     foreground: root.barIconColor
-    tooltipText: "NordVPN — " + nord.statusText + root.tooltipCountry
+    tooltipText: {
+      var parts = ["NordVPN — " + nord.statusText + root.tooltipCountry]
+      if (nord.publicIp !== "") parts.push("IP " + nord.publicIp)
+      if (nord.tailscaleConnected) parts.push("Tailscale " + (nord.tailscaleIp || nord.tailscaleHostname))
+      return parts.join(" · ")
+    }
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) nord.refresh()
       else if (buttonCode === Qt.MiddleButton) nord.toggle()
@@ -171,6 +176,89 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.WordWrap
+          }
+
+          PanelSeparator { foreground: root.foreground }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(8)
+            PanelSectionHeader {
+              text: "STATUS"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+              Text {
+                width: Style.space(90)
+                text: "Public IP"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              Text {
+                width: parent.width - Style.space(98)
+                text: nord.publicIpText
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+            }
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+              visible: nord.connected && nord.ip !== "" && nord.ip !== nord.publicIp
+              Text {
+                width: Style.space(90)
+                text: "NordVPN"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              Text {
+                width: parent.width - Style.space(98)
+                text: nord.ip
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+            }
+            Row {
+              width: parent.width
+              spacing: Style.space(8)
+              Text {
+                width: Style.space(90)
+                text: "Tailscale"
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              Column {
+                width: parent.width - Style.space(98)
+                spacing: Style.space(2)
+                Text {
+                  width: parent.width
+                  text: nord.tailscaleSummary
+                  color: nord.tailscaleConnected ? root.foreground : root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  wrapMode: Text.WordWrap
+                }
+                Text {
+                  width: parent.width
+                  visible: nord.tailscaleDetailText !== ""
+                  text: nord.tailscaleDetailText
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+              }
+            }
           }
 
           PanelSeparator { foreground: root.foreground }
