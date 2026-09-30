@@ -43,6 +43,9 @@ Item {
   property string tailscaleDnsName: ""
   property string tailscaleIp: ""
   property var tailscaleIps: []
+  property string publicIpLine: "Checking…"
+  property string tailscaleLine: "Checking…"
+  property string tailscaleDetailLine: ""
   property string _statusOutput: ""
   property string _countriesOutput: ""
   property string _settingsOutput: ""
@@ -73,23 +76,38 @@ Item {
     if (city !== "" && country !== "") return city + ", " + country
     return country || server || ""
   }
-  readonly property string publicIpText: publicIpLoading && publicIp === ""
-    ? "Checking…"
-    : (publicIp !== "" ? publicIp : "Unavailable")
-  readonly property string tailscaleSummary: Model.tailscaleSummary({
-    connected: tailscaleConnected,
-    state: tailscaleState,
-    hostname: tailscaleHostname,
-    dnsName: tailscaleDnsName,
-    ip: tailscaleIp
-  })
-  readonly property string tailscaleDetailText: {
-    if (!tailscaleConnected) return ""
+  readonly property string heroMeta: {
     var parts = []
-    if (tailscaleDnsName !== "" && tailscaleDnsName !== tailscaleHostname)
-      parts.push(tailscaleDnsName)
-    if (tailscaleIps.length > 1) parts.push(tailscaleIps.join(", "))
+    parts.push(locationText !== "" ? statusText + " · " + locationText : statusText)
+    if (publicIp !== "") parts.push(publicIp)
+    if (tailscaleConnected)
+      parts.push("TS " + (tailscaleIp !== "" ? tailscaleIp : (tailscaleHostname || "up")))
     return parts.join(" · ")
+  }
+
+  function updatePublicIpLine() {
+    if (publicIpLoading && publicIp === "") root.publicIpLine = "Checking…"
+    else if (publicIp !== "") root.publicIpLine = publicIp
+    else root.publicIpLine = "Unavailable"
+  }
+
+  function updateTailscaleLines() {
+    root.tailscaleLine = Model.tailscaleSummary({
+      connected: root.tailscaleConnected,
+      state: root.tailscaleState,
+      hostname: root.tailscaleHostname,
+      dnsName: root.tailscaleDnsName,
+      ip: root.tailscaleIp
+    })
+    if (!root.tailscaleConnected) {
+      root.tailscaleDetailLine = ""
+      return
+    }
+    var parts = []
+    if (root.tailscaleDnsName !== "" && root.tailscaleDnsName !== root.tailscaleHostname)
+      parts.push(root.tailscaleDnsName)
+    if (root.tailscaleIps.length > 1) parts.push(root.tailscaleIps.join(", "))
+    root.tailscaleDetailLine = parts.join(" · ")
   }
 
   function setting(name, fallback) {
@@ -128,6 +146,7 @@ Item {
     root.tailscaleDnsName = ""
     root.tailscaleIp = ""
     root.tailscaleIps = []
+    root.updateTailscaleLines()
   }
 
   function refreshSettings() {
@@ -264,8 +283,11 @@ Item {
 
   function applyDnsFromSettings(rawSettings) {
     var value = rawSettings["dns"] || ""
-    root.dnsServers = Model.parseDnsServers(value)
-    root.dnsMode = Model.dnsMode(value)
+    var nextServers = Model.parseDnsServers(value)
+    var nextMode = Model.dnsMode(value)
+    var sameServers = nextServers.join(",") === root.dnsServers.join(",")
+    if (!sameServers) root.dnsServers = nextServers
+    if (nextMode !== root.dnsMode) root.dnsMode = nextMode
   }
 
   Timer {
@@ -346,6 +368,7 @@ Item {
         var parsed = Model.parsePublicIp(publicIpStdout.text || "")
         if (parsed !== "") root.publicIp = parsed
       }
+      root.updatePublicIpLine()
     }
   }
 
@@ -357,12 +380,14 @@ Item {
     onExited: function(exitCode) {
       if (exitCode !== 0) {
         root.clearTailscaleInfo()
+        root.tailscaleLine = "Not installed / unavailable"
         return
       }
       var parsed = Model.parseTailscaleStatus(tailscaleStdout.text || "")
       if (!parsed.ok) {
         root.clearTailscaleInfo()
         root.tailscaleState = "Unavailable"
+        root.tailscaleLine = "Unavailable"
         return
       }
       root.tailscaleConnected = parsed.connected
@@ -371,6 +396,7 @@ Item {
       root.tailscaleDnsName = parsed.dnsName
       root.tailscaleIp = parsed.ip
       root.tailscaleIps = parsed.ips
+      root.updateTailscaleLines()
     }
   }
 

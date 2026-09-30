@@ -22,10 +22,9 @@ Panel {
   readonly property string tooltipCountry: nord.locationText !== "" ? " (" + nord.locationText + ")" : ""
 
   property bool updatingCountryPicker: false
-  property string customDns1: ""
-  property string customDns2: ""
-  property string customDns3: ""
-  property bool syncingDnsFields: false
+  // Seed DNS boxes once from NordVPN (or again only after a preset click).
+  // Never rewrite them while the user is typing.
+  property bool dnsAllowSeed: true
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -41,27 +40,35 @@ Panel {
     root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
-  function syncDnsFields() {
-    root.syncingDnsFields = true
-    root.customDns1 = nord.dnsServers[0] || ""
-    root.customDns2 = nord.dnsServers[1] || ""
-    root.customDns3 = nord.dnsServers[2] || ""
-    root.syncingDnsFields = false
+  function seedDnsFields() {
+    if (!root.dnsAllowSeed) return
+    dns1Field.text = nord.dnsServers[0] || ""
+    dns2Field.text = nord.dnsServers[1] || ""
+    dns3Field.text = nord.dnsServers[2] || ""
+    root.dnsAllowSeed = false
   }
 
   function applyCustomDns() {
-    nord.setDnsServers([root.customDns1, root.customDns2, root.customDns3])
+    nord.setDnsServers([
+      String(dns1Field.text || "").trim(),
+      String(dns2Field.text || "").trim(),
+      String(dns3Field.text || "").trim()
+    ])
+  }
+
+  function applyDnsPreset(preset) {
+    root.dnsAllowSeed = true
+    nord.setDnsPreset(preset)
   }
 
   onOpenedChanged: if (opened) {
     nord.refresh()
     nord.refreshSettings()
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   Connections {
     target: nord
-    function onDnsServersChanged() { root.syncDnsFields() }
+    function onDnsServersChanged() { root.seedDnsFields() }
     function onCountryChanged() {
       if (countryPicker.value !== nord.country) {
         root.updatingCountryPicker = true
@@ -80,12 +87,7 @@ Panel {
     bar: root.bar
     text: "󰦝"
     foreground: root.barIconColor
-    tooltipText: {
-      var parts = ["NordVPN — " + nord.statusText + root.tooltipCountry]
-      if (nord.publicIp !== "") parts.push("IP " + nord.publicIp)
-      if (nord.tailscaleConnected) parts.push("Tailscale " + (nord.tailscaleIp || nord.tailscaleHostname))
-      return parts.join(" · ")
-    }
+    tooltipText: "NordVPN — " + nord.heroMeta + root.tooltipCountry
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) nord.refresh()
       else if (buttonCode === Qt.MiddleButton) nord.toggle()
@@ -114,6 +116,8 @@ Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
+        if (dns1Field.activeFocus || dns2Field.activeFocus || dns3Field.activeFocus)
+          return
         if (t === "r" || t === "R") nord.refresh()
         else if (t === "c" || t === "C") nord.toggle()
       }
@@ -137,7 +141,7 @@ Panel {
             id: hero
             width: parent.width
             title: "NordVPN"
-            meta: nord.locationText !== "" ? nord.statusText + " · " + nord.locationText : nord.statusText
+            meta: nord.heroMeta
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconOpacity: nord.unavailable ? 0.5 : (nord.active ? 1.0 : 0.6)
@@ -184,80 +188,80 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
             PanelSectionHeader {
-              text: "STATUS"
+              text: "NETWORK"
               foreground: root.foreground
               fontFamily: root.fontFamily
             }
-            Row {
+            Text {
               width: parent.width
-              spacing: Style.space(8)
-              Text {
-                width: Style.space(90)
-                text: "Public IP"
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-              Text {
-                width: parent.width - Style.space(98)
-                text: nord.publicIpText
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
+              text: "Public IP: " + nord.publicIpLine
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
             }
-            Row {
+            Text {
               width: parent.width
-              spacing: Style.space(8)
               visible: nord.connected && nord.ip !== "" && nord.ip !== nord.publicIp
-              Text {
-                width: Style.space(90)
-                text: "NordVPN"
-                color: root.dim
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-              Text {
-                width: parent.width - Style.space(98)
-                text: nord.ip
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
+              text: "NordVPN IP: " + nord.ip
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+            Text {
+              width: parent.width
+              text: "Tailscale: " + nord.tailscaleLine
+              color: nord.tailscaleConnected ? root.foreground : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              wrapMode: Text.WordWrap
+            }
+            Text {
+              width: parent.width
+              visible: nord.tailscaleDetailLine !== ""
+              text: nord.tailscaleDetailLine
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
             Row {
               width: parent.width
               spacing: Style.space(8)
               Text {
-                width: Style.space(90)
-                text: "Tailscale"
-                color: root.dim
+                width: parent.width - tailscaleSwitch.width - Style.space(8)
+                text: "Allow Tailscale with NordVPN"
+                color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+                verticalAlignment: Text.AlignVCenter
               }
-              Column {
-                width: parent.width - Style.space(98)
-                spacing: Style.space(2)
-                Text {
-                  width: parent.width
-                  text: nord.tailscaleSummary
-                  color: nord.tailscaleConnected ? root.foreground : root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  wrapMode: Text.WordWrap
-                }
-                Text {
-                  width: parent.width
-                  visible: nord.tailscaleDetailText !== ""
-                  text: nord.tailscaleDetailText
-                  color: root.dim
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
+              ToggleSwitch {
+                id: tailscaleSwitch
+                checked: nord.allowTailscale
+                busy: nord.settingsBusy
+                interactive: !nord.unavailable
+                foreground: root.foreground
+                onToggled: {
+                  var enabled = !checked
+                  nord.setAllowTailscale(enabled)
+                  root.persistSetting("allowTailscale", enabled)
                 }
               }
+            }
+            Text {
+              width: parent.width
+              text: nord.allowTailscale
+                ? (nord.tailscaleAllowlisted
+                  ? "Allowlisted 100.64.0.0/10 + UDP 41641"
+                  : "Applying Tailscale allowlist…")
+                : "Off: NordVPN may block Tailscale while connected"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
           }
 
@@ -363,55 +367,6 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
             PanelSectionHeader {
-              text: "TAILSCALE"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-            Row {
-              width: parent.width
-              spacing: Style.space(8)
-              Text {
-                width: parent.width - tailscaleSwitch.width - Style.space(8)
-                text: "Allow Tailscale with NordVPN"
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-                verticalAlignment: Text.AlignVCenter
-              }
-              ToggleSwitch {
-                id: tailscaleSwitch
-                checked: nord.allowTailscale
-                busy: nord.settingsBusy
-                interactive: !nord.unavailable
-                foreground: root.foreground
-                onToggled: {
-                  var enabled = !checked
-                  nord.setAllowTailscale(enabled)
-                  root.persistSetting("allowTailscale", enabled)
-                }
-              }
-            }
-            Text {
-              width: parent.width
-              text: nord.allowTailscale
-                ? (nord.tailscaleAllowlisted
-                  ? "Allowlisted 100.64.0.0/10 and UDP 41641 so Tailscale can stay up."
-                  : "Applying Tailscale allowlist…")
-                : "Off: NordVPN may block Tailscale traffic while connected."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-          }
-
-          PanelSeparator { foreground: root.foreground }
-
-          Column {
-            width: parent.width
-            spacing: Style.space(8)
-            PanelSectionHeader {
               text: "DNS"
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -433,7 +388,7 @@ Panel {
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
                 enabled: !nord.unavailable && !nord.settingsBusy
-                onClicked: nord.setDnsPreset("off")
+                onClicked: root.applyDnsPreset("off")
               }
               Button {
                 width: dnsRow.cellWidth
@@ -444,7 +399,7 @@ Panel {
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
                 enabled: !nord.unavailable && !nord.settingsBusy
-                onClicked: nord.setDnsPreset("cloudflare")
+                onClicked: root.applyDnsPreset("cloudflare")
               }
               Button {
                 width: dnsRow.cellWidth
@@ -455,7 +410,7 @@ Panel {
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
                 enabled: !nord.unavailable && !nord.settingsBusy
-                onClicked: nord.setDnsPreset("google")
+                onClicked: root.applyDnsPreset("google")
               }
               Button {
                 width: dnsRow.cellWidth
@@ -487,8 +442,6 @@ Panel {
               foreground: root.foreground
               font.family: root.fontFamily
               placeholderText: "Primary DNS (IPv4)"
-              text: root.customDns1
-              onTextChanged: if (!root.syncingDnsFields) root.customDns1 = text
               onAccepted: applyCustomDns()
             }
             TextField {
@@ -497,8 +450,6 @@ Panel {
               foreground: root.foreground
               font.family: root.fontFamily
               placeholderText: "Secondary DNS (optional)"
-              text: root.customDns2
-              onTextChanged: if (!root.syncingDnsFields) root.customDns2 = text
               onAccepted: applyCustomDns()
             }
             TextField {
@@ -507,8 +458,6 @@ Panel {
               foreground: root.foreground
               font.family: root.fontFamily
               placeholderText: "Tertiary DNS (optional)"
-              text: root.customDns3
-              onTextChanged: if (!root.syncingDnsFields) root.customDns3 = text
               onAccepted: applyCustomDns()
             }
 
