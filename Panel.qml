@@ -22,6 +22,7 @@ Panel {
   readonly property string tooltipCountry: nord.locationText !== "" ? " (" + nord.locationText + ")" : ""
 
   property bool updatingCountryPicker: false
+  property bool updatingCityPicker: false
   // Seed DNS boxes once from NordVPN (or again only after a preset click).
   // Never rewrite them while the user is typing.
   property bool dnsAllowSeed: true
@@ -64,20 +65,44 @@ Panel {
   onOpenedChanged: if (opened) {
     nord.refresh()
     nord.refreshSettings()
+    if (nord.autoConnectCountry !== "")
+      nord.loadAutoConnectCities(nord.autoConnectCountry)
   }
 
   Connections {
     target: nord
     function onDnsServersChanged() { root.seedDnsFields() }
-    function onCountryChanged() {
-      if (countryPicker.value !== nord.country) {
+    function onSelectedCountryChanged() {
+      var value = nord.countryValue || nord.selectedCountry
+      if (countryPicker.value !== value) {
         root.updatingCountryPicker = true
-        countryPicker.value = nord.country
+        countryPicker.value = value
         root.updatingCountryPicker = false
       }
     }
+    function onSelectedCityChanged() {
+      var value = nord.cityValue || nord.selectedCity
+      if (cityPicker.value !== value) {
+        root.updatingCityPicker = true
+        cityPicker.value = value
+        root.updatingCityPicker = false
+      }
+    }
+    function onCitiesChanged() {
+      var value = nord.cityValue || nord.selectedCity
+      root.updatingCityPicker = true
+      cityPicker.value = value
+      root.updatingCityPicker = false
+    }
     function onAutoConnectCountryChanged() {
       autoConnectCountryPicker.value = nord.autoConnectCountry
+      nord.loadAutoConnectCities(nord.autoConnectCountry)
+    }
+    function onAutoConnectCityChanged() {
+      autoConnectCityPicker.value = nord.autoConnectCity
+    }
+    function onAutoConnectCitiesChanged() {
+      autoConnectCityPicker.value = Model.matchOptionValue(nord.autoConnectCities, nord.autoConnectCity)
     }
   }
 
@@ -109,7 +134,9 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       blocked: countryPicker.popupOpen
+        || cityPicker.popupOpen
         || autoConnectCountryPicker.popupOpen
+        || autoConnectCityPicker.popupOpen
         || dns1Field.activeFocus
         || dns2Field.activeFocus
         || dns3Field.activeFocus
@@ -282,10 +309,34 @@ Panel {
               placeholderText: "Search countries..."
               fontFamily: root.fontFamily
               options: nord.countries
-              value: nord.country
+              value: nord.countryValue
               onChanged: function(v) {
                 if (!root.updatingCountryPicker) nord.setCountry(v)
               }
+            }
+            SearchableDropdown {
+              id: cityPicker
+              width: parent.width
+              showLabel: false
+              visible: nord.countryValue !== ""
+              placeholderText: nord.citiesLoaded && nord.cities.length === 0
+                ? "No cities for this country"
+                : "Search cities (e.g. Boston)..."
+              fontFamily: root.fontFamily
+              options: nord.cities
+              value: nord.cityValue
+              onChanged: function(v) {
+                if (!root.updatingCityPicker) nord.setCity(v)
+              }
+            }
+            Text {
+              width: parent.width
+              visible: nord.countryValue !== "" && nord.citiesLoaded && nord.cities.length === 0
+              text: "This country has no city list — country-level connect only."
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
             }
             Text {
               width: parent.width
@@ -344,16 +395,40 @@ Panel {
               value: nord.autoConnectCountry
               onChanged: function(v) {
                 nord.autoConnectCountry = v
+                nord.autoConnectCity = ""
                 root.persistSetting("autoConnectCountry", v)
+                root.persistSetting("autoConnectCity", "")
+                nord.loadAutoConnectCities(v)
+                if (Model.settingEnabled(nord.vpnSettings["auto-connect"]))
+                  nord.setAutoconnect(true)
+              }
+            }
+            SearchableDropdown {
+              id: autoConnectCityPicker
+              width: parent.width
+              showLabel: false
+              visible: nord.autoConnectCountry !== ""
+              placeholderText: "Preferred city (optional)..."
+              fontFamily: root.fontFamily
+              options: nord.autoConnectCities
+              value: nord.autoConnectCity
+              onChanged: function(v) {
+                nord.autoConnectCity = v
+                root.persistSetting("autoConnectCity", v)
                 if (Model.settingEnabled(nord.vpnSettings["auto-connect"]))
                   nord.setAutoconnect(true)
               }
             }
             Text {
               width: parent.width
-              text: nord.autoConnectCountry === ""
-                ? "Empty country: NordVPN picks the fastest server when auto-connecting."
-                : "Auto-connect will use the selected country."
+              text: {
+                if (nord.autoConnectCountry === "")
+                  return "Empty country: NordVPN picks the fastest server when auto-connecting."
+                if (nord.autoConnectCity !== "")
+                  return "Auto-connect will use " + Model.locationLabel(nord.autoConnectCity)
+                    + ", " + Model.locationLabel(nord.autoConnectCountry) + "."
+                return "Auto-connect will use the selected country (any city)."
+              }
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -481,7 +556,18 @@ Panel {
 
             Text {
               width: parent.width
-              text: "Pi-hole / LAN DNS is allowlisted automatically before apply so it stays reachable over NordVPN. Set the Pi-hole address in widget settings (piholeDns), then use the Pi-hole button or Apply. Custom DNS disables Threat Protection."
+              visible: dnsRow.piholeSelected || (nord.dnsServers.length > 0 && Model.isPrivateOrLocalIpv4(nord.dnsServers[0]))
+              text: nord.lanDiscoveryEnabled
+                ? "LAN Discovery: on (required for Pi-hole over NordVPN)"
+                : "LAN Discovery: off — enable via Pi-hole/Apply so DNS works over VPN"
+              color: nord.lanDiscoveryEnabled ? root.dim : root.urgent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
+            Text {
+              width: parent.width
+              text: "Pi-hole / LAN DNS enables NordVPN LAN Discovery so your resolver stays reachable over the tunnel (subnet allowlists alone are not enough). Tailscale allowlists are re-applied afterward if enabled. Set piholeDns in widget settings, then use Pi-hole or Apply. Custom DNS disables Threat Protection."
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption

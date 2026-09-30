@@ -1,21 +1,58 @@
-function countryLabel(name) {
-  return String(name || "").trim().replace(/\s+/g, " ")
+function locationKey(name) {
+  return String(name || "").trim().toLowerCase().replace(/[\s_-]+/g, "_")
 }
 
-function parseCountries(raw) {
+function locationLabel(name) {
+  return String(name || "").trim().replace(/_/g, " ").replace(/\s+/g, " ")
+}
+
+function countryLabel(name) {
+  return locationLabel(name)
+}
+
+function parseLocationList(raw, headerRe) {
   var lines = String(raw || "").split("\n")
   var seen = {}
   var out = []
   for (var i = 0; i < lines.length; i++) {
-    var country = lines[i].trim()
-    if (country === "" || /^countries:?$/i.test(country) || seen[country]) continue
-    seen[country] = true
-    out.push({ value: country, label: countryLabel(country) })
+    var item = lines[i].trim()
+    if (item === "" || (headerRe && headerRe.test(item)) || seen[item]) continue
+    // Skip CLI prose lines ("Servers by city are not available…")
+    if (/\s/.test(item) && item.indexOf("_") < 0 && !/^[A-Za-z][A-Za-z0-9_]*$/.test(item))
+      continue
+    if (/not available|virtual location|press the tab/i.test(item)) continue
+    seen[item] = true
+    out.push({ value: item, label: locationLabel(item) })
   }
   out.sort(function(a, b) {
     return a.label < b.label ? -1 : (a.label > b.label ? 1 : 0)
   })
   return out
+}
+
+function parseCountries(raw) {
+  return parseLocationList(raw, /^countries:?$/i)
+}
+
+function parseCities(raw) {
+  return parseLocationList(raw, /^cities:?$/i)
+}
+
+function matchOptionValue(options, raw) {
+  var key = locationKey(raw)
+  if (key === "" || !options || !options.length) return ""
+  for (var i = 0; i < options.length; i++) {
+    if (locationKey(options[i].value) === key) return options[i].value
+  }
+  return ""
+}
+
+function connectArgs(country, city) {
+  var countryValue = String(country || "").trim()
+  var cityValue = String(city || "").trim()
+  if (countryValue === "") return []
+  if (cityValue === "") return [countryValue]
+  return [countryValue, cityValue]
 }
 
 function parseStatus(raw) {
@@ -176,6 +213,7 @@ function autoConnectTarget(value) {
   var target = String(value || "").trim()
   if (target === "") return ""
   if (/^[a-z]{2}(?:[0-9]+)?$/i.test(target)) return target.toLowerCase()
+  var key = locationKey(target).replace(/_/g, " ")
   var codes = {
     "argentina": "ar", "australia": "au", "austria": "at", "belgium": "be",
     "botswana": "bw", "brazil": "br", "bulgaria": "bg", "canada": "ca",
@@ -194,8 +232,21 @@ function autoConnectTarget(value) {
     "united arab emirates": "ae", "united kingdom": "uk", "united states": "us",
     "vietnam": "vn"
   }
-  if (codes[target.toLowerCase()]) return codes[target.toLowerCase()]
+  if (codes[key]) return codes[key]
+  // Underscore forms from `nordvpn countries` / `cities` are valid CLI args.
+  if (/^[A-Za-z][A-Za-z0-9_]*$/.test(target)) return target
   return /^[a-z][a-z .'-]{1,63}$/i.test(target) ? target : ""
+}
+
+function autoConnectArgs(country, city) {
+  var cityValue = String(city || "").trim()
+  var countryValue = String(country || "").trim()
+  if (cityValue !== "") {
+    if (countryValue !== "") return [countryValue, cityValue]
+    return [cityValue]
+  }
+  var target = autoConnectTarget(countryValue)
+  return target === "" ? [] : [target]
 }
 
 function statusText(state) {

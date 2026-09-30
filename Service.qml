@@ -9,10 +9,12 @@ Item {
 
   property var settings: ({})
   property string autoConnectCountry: String(setting("autoConnectCountry", "")).trim()
+  property string autoConnectCity: String(setting("autoConnectCity", "")).trim()
   property bool allowTailscale: false
 
   onSettingsChanged: {
     root.autoConnectCountry = String(setting("autoConnectCountry", "")).trim()
+    root.autoConnectCity = String(setting("autoConnectCity", "")).trim()
     root.allowTailscale = setting("allowTailscale", false) === true
     root.piholeDns = String(setting("piholeDns", "")).trim()
   }
@@ -29,6 +31,13 @@ Item {
   property string ip: ""
   property var countries: []
   property bool countriesLoaded: false
+  property var cities: []
+  property bool citiesLoaded: false
+  property string citiesCountry: ""
+  property var autoConnectCities: []
+  property string autoConnectCitiesCountry: ""
+  property string selectedCountry: ""
+  property string selectedCity: ""
   property int _desired: -1
   property string actionStatus: ""
   property string lastError: ""
@@ -50,14 +59,19 @@ Item {
   property string tailscaleDetailLine: ""
   property string _statusOutput: ""
   property string _countriesOutput: ""
+  property string _citiesOutput: ""
   property string _settingsOutput: ""
   property string _syncedAutoConnectCountry: ""
+  property string _syncedAutoConnectCity: ""
   property bool _settingsInitialized: false
   property bool _settingsRefreshPending: false
   property var _allowlistQueue: []
   property bool _allowlistSyncing: false
   property var _pendingDnsServers: null
+  property var _pendingConnectCommand: null
+  property bool _lanDiscoveryEnsuring: false
   property string piholeDns: String(setting("piholeDns", "")).trim()
+  readonly property bool lanDiscoveryEnabled: Model.settingEnabled(vpnSettings["lan-discovery"])
 
   readonly property bool connected: connectionState === "Connected"
   readonly property bool transitioning: connectionState === "Connecting"
@@ -67,13 +81,18 @@ Item {
   readonly property bool active: _desired === -1 ? connected : (_desired === 1)
   readonly property bool busy: statusProcess.running
     || countriesProcess.running
+    || citiesProcess.running
     || controlProcess.running
     || setCountryProcess.running
+  readonly property string countryValue: Model.matchOptionValue(countries, selectedCountry || country)
+  readonly property string cityValue: Model.matchOptionValue(cities, selectedCity || city)
   readonly property bool settingsBusy: settingsProcess.running
     || setSettingProcess.running
+    || setLanDiscoveryProcess.running
     || dnsProcess.running
     || allowlistProcess.running
     || _allowlistSyncing
+    || _lanDiscoveryEnsuring
   readonly property string statusText: Model.statusText(connectionState)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 5, 2, 60)
   readonly property string locationText: {
@@ -128,8 +147,50 @@ Item {
   function refresh() {
     if (!statusProcess.running) statusProcess.running = true
     if (!countriesLoaded && !countriesProcess.running) countriesProcess.running = true
+    if (root.countryValue !== "" && root.citiesCountry !== root.countryValue)
+      root.loadCities(root.countryValue)
     root.refreshPublicIp()
     root.refreshTailscale()
+  }
+
+  function clearCities() {
+    root.cities = []
+    root.citiesLoaded = false
+    root.citiesCountry = ""
+    root._citiesOutput = ""
+  }
+
+  function loadCities(countryValue) {
+    var target = String(countryValue || "").trim()
+    if (target === "") {
+      root.clearCities()
+      return
+    }
+    if (root.citiesCountry === target && (root.citiesLoaded || citiesProcess.running)) return
+    root.citiesCountry = target
+    root.citiesLoaded = false
+    citiesProcess.command = ["nordvpn", "cities", target]
+    citiesProcess.running = true
+  }
+
+  function loadAutoConnectCities(countryValue) {
+    var target = Model.matchOptionValue(root.countries, countryValue) || String(countryValue || "").trim()
+    if (target === "") {
+      root.autoConnectCities = []
+      root.autoConnectCitiesCountry = ""
+      return
+    }
+    if (root.autoConnectCitiesCountry === target && autoConnectCitiesProcess.running) return
+    if (root.autoConnectCitiesCountry === target && root.autoConnectCities.length > 0) return
+    // Reuse the server city list when it already matches.
+    if (root.citiesCountry === target && root.citiesLoaded) {
+      root.autoConnectCitiesCountry = target
+      root.autoConnectCities = root.cities.slice()
+      return
+    }
+    root.autoConnectCitiesCountry = target
+    autoConnectCitiesProcess.command = ["nordvpn", "cities", target]
+    autoConnectCitiesProcess.running = true
   }
 
   function refreshPublicIp() {
@@ -162,14 +223,16 @@ Item {
   }
 
   function toggle() {
-    if (controlProcess.running) return
+    if (controlProcess.running || setCountryProcess.running) return
     _desired = (connected || transitioning) ? 0 : 1
     if (_desired === 1) {
-      if (root.allowTailscale) root.ensureTailscaleAllowlist()
-      // Keep Pi-hole reachable before the tunnel comes up.
-      root.ensureLanDnsAllowlist(root.dnsServers)
+      root._pendingConnectCommand = ["nordvpn", "connect"]
+      root.prepareLanDnsAccess(root.dnsServers)
+      root.flushPendingConnect()
+      return
     }
-    controlProcess.command = _desired === 1 ? ["nordvpn", "connect"] : ["nordvpn", "disconnect"]
+    root._pendingConnectCommand = null
+    controlProcess.command = ["nordvpn", "disconnect"]
     controlProcess.running = true
   }
 
@@ -184,6 +247,7 @@ Item {
     if (root._allowlistQueue.length === 0) {
       root._allowlistSyncing = false
       root.flushPendingDns()
+      root.flushPendingConnect()
       return
     }
     root._allowlistSyncing = true
@@ -194,26 +258,59 @@ Item {
   function flushPendingDns() {
     if (!root._pendingDnsServers || root._pendingDnsServers.length === 0) return
     if (dnsProcess.running || root._allowlistSyncing || root._allowlistQueue.length > 0) return
+    if (setLanDiscoveryProcess.running || root._lanDiscoveryEnsuring) return
     var servers = root._pendingDnsServers
     root._pendingDnsServers = null
     dnsProcess.command = ["nordvpn", "set", "dns"].concat(servers)
     dnsProcess.running = true
   }
 
-  function ensureLanDnsAllowlist(servers) {
-    var lan = Model.lanDnsServers(servers)
-    var blob = root._settingsOutput + "\n" + JSON.stringify(root.vpnSettings)
-    var queued = false
-    for (var i = 0; i < lan.length; i++) {
-      var cidrs = Model.lanDnsAllowlistCidrs(lan[i])
-      for (var j = 0; j < cidrs.length; j++) {
-        if (blob.indexOf(cidrs[j]) !== -1) continue
-        root.enqueueAllowlist(["nordvpn", "allowlist", "add", "subnet", cidrs[j]])
-        blob += "\n" + cidrs[j]
-        queued = true
-      }
+  function flushPendingConnect() {
+    if (!root._pendingConnectCommand || !root._pendingConnectCommand.length) return
+    if (controlProcess.running || setCountryProcess.running) return
+    if (dnsProcess.running || root._allowlistSyncing || root._allowlistQueue.length > 0) return
+    if (setLanDiscoveryProcess.running || root._lanDiscoveryEnsuring) return
+    var command = root._pendingConnectCommand
+    root._pendingConnectCommand = null
+    if (command.length >= 2 && command[1] === "disconnect") {
+      controlProcess.command = command
+      controlProcess.running = true
+      return
     }
-    return queued
+    if (command.length === 2 && command[1] === "connect") {
+      controlProcess.command = command
+      controlProcess.running = true
+      return
+    }
+    setCountryProcess.command = command
+    setCountryProcess.running = true
+  }
+
+  // Pi-hole / LAN DNS needs NordVPN "LAN Discovery". Enabling that clears
+  // private subnet allowlists by design; Tailscale CGNAT is re-allowlisted after.
+  function ensureLanDiscovery() {
+    if (root.lanDiscoveryEnabled || root._lanDiscoveryEnsuring || setLanDiscoveryProcess.running)
+      return root._lanDiscoveryEnsuring || setLanDiscoveryProcess.running
+    root._lanDiscoveryEnsuring = true
+    setLanDiscoveryProcess.command = ["nordvpn", "set", "lan-discovery", "on"]
+    setLanDiscoveryProcess.running = true
+    return true
+  }
+
+  function prepareLanDnsAccess(servers) {
+    var lan = Model.lanDnsServers(servers)
+    var pending = false
+    if (lan.length > 0) pending = root.ensureLanDiscovery() || pending
+    if (root.allowTailscale) {
+      // LAN Discovery may have wiped CGNAT allowlists — always re-check.
+      root.ensureTailscaleAllowlist()
+      pending = pending || root._allowlistQueue.length > 0 || root._allowlistSyncing
+    }
+    return pending
+  }
+
+  function ensureLanDnsAllowlist(servers) {
+    return root.prepareLanDnsAccess(servers)
   }
 
   function ensureTailscaleAllowlist() {
@@ -236,28 +333,45 @@ Item {
   }
 
   function setCountry(value) {
-    if (!value || setCountryProcess.running) return
-    // Only touch the allowlist when the user opted in; never on a timer poll.
-    if (root.allowTailscale) root.ensureTailscaleAllowlist()
-    root.ensureLanDnsAllowlist(root.dnsServers)
-    setCountryProcess.command = ["nordvpn", "connect", value]
-    setCountryProcess.running = true
+    var countryValue = String(value || "").trim()
+    if (!countryValue || setCountryProcess.running) return
+    root.selectedCountry = countryValue
+    root.selectedCity = ""
+    root.loadCities(countryValue)
+    root.connectLocation(countryValue, "")
+  }
+
+  function setCity(value) {
+    var cityValue = String(value || "").trim()
+    var countryValue = root.countryValue
+    if (countryValue === "" || setCountryProcess.running) return
+    root.selectedCity = cityValue
+    root.connectLocation(countryValue, cityValue)
+  }
+
+  function connectLocation(countryValue, cityValue) {
+    var args = Model.connectArgs(countryValue, cityValue)
+    if (!args.length || setCountryProcess.running || controlProcess.running) return
+    root._pendingConnectCommand = ["nordvpn", "connect"].concat(args)
+    root.prepareLanDnsAccess(root.dnsServers)
+    root.flushPendingConnect()
   }
 
   function setAutoconnect(enabled) {
     if (setSettingProcess.running) return
     var argument = enabled ? "on" : "off"
     var command = ["nordvpn", "set", "autoconnect", argument]
-    if (enabled && root.autoConnectCountry !== "") {
-      var target = Model.autoConnectTarget(root.autoConnectCountry)
-      if (target === "") {
-        root.settingsError = "Invalid auto-connect country"
+    if (enabled && (root.autoConnectCountry !== "" || root.autoConnectCity !== "")) {
+      var args = Model.autoConnectArgs(root.autoConnectCountry, root.autoConnectCity)
+      if (!args.length) {
+        root.settingsError = "Invalid auto-connect location"
         root.actionStatus = root.settingsError
         actionStatusTimer.restart()
         return
       }
       root._syncedAutoConnectCountry = root.autoConnectCountry
-      command.push(target)
+      root._syncedAutoConnectCity = root.autoConnectCity
+      command = command.concat(args)
     }
     var optimistic = Object.assign({}, root.vpnSettings)
     optimistic["auto-connect"] = enabled ? "enabled" : "disabled"
@@ -267,11 +381,16 @@ Item {
   }
 
   function syncAutoConnectCountry() {
-    var configured = root.autoConnectCountry
-    if (!Model.settingEnabled(root.vpnSettings["auto-connect"]) || configured === "") return
-    if (configured === root._syncedAutoConnectCountry || setSettingProcess.running) return
-    if (Model.autoConnectTarget(configured) === "") return
-    root._syncedAutoConnectCountry = configured
+    var configuredCountry = root.autoConnectCountry
+    var configuredCity = root.autoConnectCity
+    if (!Model.settingEnabled(root.vpnSettings["auto-connect"])) return
+    if (configuredCountry === "" && configuredCity === "") return
+    if (configuredCountry === root._syncedAutoConnectCountry
+      && configuredCity === root._syncedAutoConnectCity) return
+    if (setSettingProcess.running) return
+    if (!Model.autoConnectArgs(configuredCountry, configuredCity).length) return
+    root._syncedAutoConnectCountry = configuredCountry
+    root._syncedAutoConnectCity = configuredCity
     root.setAutoconnect(true)
   }
 
@@ -283,7 +402,7 @@ Item {
   }
 
   function setDnsServers(servers) {
-    if (dnsProcess.running || root._allowlistSyncing) return
+    if (dnsProcess.running || root._allowlistSyncing || root._lanDiscoveryEnsuring) return
     var normalized = Model.normalizeDnsServers(servers)
     if (!normalized.ok) {
       root.settingsError = normalized.error
@@ -291,13 +410,14 @@ Item {
       actionStatusTimer.restart()
       return
     }
-    // Pi-hole / LAN DNS: allowlist the resolver first, then set DNS.
-    // Setting DNS before allowlisting is what drops the network over VPN.
+    // Pi-hole / LAN DNS: enable LAN Discovery (+ Tailscale allowlist), then set DNS.
     root._pendingDnsServers = normalized.servers.slice()
-    var queued = root.ensureLanDnsAllowlist(normalized.servers)
+    var queued = root.prepareLanDnsAccess(normalized.servers)
     if (!queued) root.flushPendingDns()
     else {
-      root.actionStatus = "Allowlisting LAN DNS, then applying…"
+      root.actionStatus = Model.lanDnsServers(normalized.servers).length > 0
+        ? "Enabling LAN Discovery for Pi-hole, then applying DNS…"
+        : "Updating allowlist, then applying DNS…"
       actionStatusTimer.restart()
       root.drainAllowlistQueue()
     }
@@ -393,6 +513,21 @@ Item {
         root.city = parsed.city
         root.server = parsed.server
         root.ip = parsed.ip
+        var matchedCountry = Model.matchOptionValue(root.countries, parsed.country)
+        if (matchedCountry !== "" && !setCountryProcess.running) {
+          root.selectedCountry = matchedCountry
+          if (root.citiesCountry !== matchedCountry) root.loadCities(matchedCountry)
+        } else if (matchedCountry !== "" && root.citiesCountry !== matchedCountry) {
+          root.loadCities(matchedCountry)
+        }
+        if (!setCountryProcess.running) {
+          if (parsed.city !== "") {
+            var matchedCity = Model.matchOptionValue(root.cities, parsed.city)
+            if (matchedCity !== "") root.selectedCity = matchedCity
+          } else if (root.citiesLoaded) {
+            root.selectedCity = ""
+          }
+        }
         if (root._desired !== -1 && root.connected === (root._desired === 1)) root._desired = -1
       } else {
         root.connectionState = "Unavailable"
@@ -459,6 +594,52 @@ Item {
       if (exitCode === 0) {
         root.countries = Model.parseCountries(countriesStdout.text || root._countriesOutput || "")
         root.countriesLoaded = root.countries.length > 0
+        var matchedCountry = Model.matchOptionValue(root.countries, root.selectedCountry || root.country)
+        if (matchedCountry !== "") {
+          root.selectedCountry = matchedCountry
+          if (root.citiesCountry !== matchedCountry) root.loadCities(matchedCountry)
+        }
+      }
+    }
+  }
+
+  Process {
+    id: citiesProcess
+    command: []
+    stdout: StdioCollector {
+      id: citiesStdout
+      waitForEnd: true
+      onStreamFinished: root._citiesOutput = text
+    }
+    stderr: StdioCollector { id: citiesStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      var raw = citiesStdout.text || root._citiesOutput || ""
+      if (exitCode === 0) {
+        root.cities = Model.parseCities(raw)
+        root.citiesLoaded = true
+        var matchedCity = Model.matchOptionValue(root.cities, root.selectedCity || root.city)
+        if (matchedCity !== "" || !setCountryProcess.running)
+          root.selectedCity = matchedCity
+        if (root.autoConnectCitiesCountry === root.citiesCountry)
+          root.autoConnectCities = root.cities.slice()
+      } else {
+        root.cities = []
+        root.citiesLoaded = true
+        if (!setCountryProcess.running) root.selectedCity = ""
+      }
+    }
+  }
+
+  Process {
+    id: autoConnectCitiesProcess
+    command: []
+    stdout: StdioCollector { id: autoConnectCitiesStdout; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.autoConnectCities = Model.parseCities(autoConnectCitiesStdout.text || "")
+      } else {
+        root.autoConnectCities = []
       }
     }
   }
@@ -492,6 +673,37 @@ Item {
   }
 
   Process {
+    id: setLanDiscoveryProcess
+    command: []
+    stdout: StdioCollector { id: setLanDiscoveryStdout; waitForEnd: true }
+    stderr: StdioCollector { id: setLanDiscoveryStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      root._lanDiscoveryEnsuring = false
+      var output = String(setLanDiscoveryStderr.text || setLanDiscoveryStdout.text || "").trim()
+      if (exitCode !== 0) {
+        root.settingsError = Model.elide(output || "Could not enable LAN Discovery")
+        root.actionStatus = root.settingsError
+        actionStatusTimer.restart()
+        root._pendingDnsServers = null
+        root._pendingConnectCommand = null
+        return
+      }
+      var optimistic = Object.assign({}, root.vpnSettings)
+      optimistic["lan-discovery"] = "enabled"
+      root.vpnSettings = optimistic
+      // LAN Discovery clears private subnet allowlists; re-apply Tailscale CGNAT.
+      root.tailscaleAllowlisted = false
+      if (root.allowTailscale) root.ensureTailscaleAllowlist()
+      root.actionStatus = "LAN Discovery enabled for Pi-hole / LAN DNS"
+      actionStatusTimer.restart()
+      root.drainAllowlistQueue()
+      root.flushPendingDns()
+      root.flushPendingConnect()
+      root.refreshSettings()
+    }
+  }
+
+  Process {
     id: allowlistProcess
     command: []
     stdout: StdioCollector { id: allowlistStdout; waitForEnd: true }
@@ -501,7 +713,7 @@ Item {
       // NordVPN returns non-zero when the entry already exists; treat that as success.
       var already = /already|exists|is in allowlist/i.test(output)
       if (exitCode !== 0 && !already) {
-        root.settingsError = Model.elide(output || "Could not update Tailscale allowlist")
+        root.settingsError = Model.elide(output || "Could not update allowlist")
         root.actionStatus = root.settingsError
         actionStatusTimer.restart()
         root._allowlistQueue = []
@@ -579,7 +791,7 @@ Item {
     stderr: StdioCollector { id: setCountryStderr; waitForEnd: true }
     onExited: function(exitCode) {
       if (exitCode !== 0) {
-        root.lastError = Model.elide(setCountryStderr.text || "Could not change NordVPN country")
+        root.lastError = Model.elide(setCountryStderr.text || "Could not change NordVPN location")
         root.actionStatus = root.lastError
         actionStatusTimer.restart()
       }

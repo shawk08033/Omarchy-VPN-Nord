@@ -10,8 +10,8 @@ auto-connect and DNS, keep Tailscale online, and see your live public IP.
 ## Features
 
 - Connect / disconnect from the bar icon or popup switch
-- Searchable country list for server switching
-- Auto-connect on startup, with an optional preferred country
+- Searchable country and city lists (for example United States → Boston)
+- Auto-connect on startup, with optional preferred country and city
 - DNS presets (Off, Cloudflare, Google, Pi-hole) plus custom IPv4 servers with automatic LAN allowlisting
 - Optional Tailscale coexistence (allowlists `100.64.0.0/10` and UDP `41641`)
 - Live **Public IP** and **Tailscale** hostname / IP in the popup
@@ -69,8 +69,8 @@ omarchy plugin remove io.github.guiestrela.nordvpn --yes
 ### Popup sections
 
 - **NETWORK** — public IP, Tailscale status, and “Allow Tailscale with NordVPN”
-- **SERVER** — searchable country picker
-- **AUTO-CONNECT** — startup reconnect + optional country
+- **SERVER** — searchable country + city pickers (`nordvpn connect <country> <city>`)
+- **AUTO-CONNECT** — startup reconnect + optional country/city
 - **DNS** — Off / Cloudflare / Google / custom IPv4 servers (Apply to save)
 
 ## Tailscale coexistence
@@ -88,8 +88,9 @@ or country switch. Turn the toggle off to remove them.
 
 ## Pi-hole / LAN DNS
 
-NordVPN can use your Pi-hole, but the Pi-hole host must be **allowlisted before**
-DNS is changed — otherwise resolution dies over the tunnel.
+NordVPN can use your Pi-hole, but LAN DNS only works over the tunnel if
+**LAN Discovery** is enabled. Subnet allowlists alone are not enough on NordLynx,
+and turning LAN Discovery on clears private subnet allowlists by design.
 
 1. Set **Pi-hole DNS address** in the widget settings (for example `192.168.2.2`).
 2. Click **Pi-hole** in the DNS row (or type the IP and **Apply custom DNS**).
@@ -97,12 +98,14 @@ DNS is changed — otherwise resolution dies over the tunnel.
 The plugin will:
 
 ```bash
-nordvpn allowlist add subnet <pihole>/32
-nordvpn allowlist add subnet <pihole-subnet>/24
+nordvpn set lan-discovery on
+# if Tailscale coexistence is enabled, re-apply after LAN Discovery:
+nordvpn allowlist add subnet 100.64.0.0/10
+nordvpn allowlist add port 41641 protocol UDP
 nordvpn set dns <pihole>
 ```
 
-That order matters. If DNS ever breaks, recover with:
+If DNS ever breaks, recover with:
 
 ```bash
 nordvpn set dns off
