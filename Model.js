@@ -126,17 +126,42 @@ function normalizeDnsServers(values) {
     var part = String(values[i] || "").trim()
     if (part === "") continue
     if (!isIpv4(part)) return { ok: false, servers: [], error: "DNS servers must be IPv4 addresses" }
-    if (isPrivateOrLocalIpv4(part)) {
+    // Loopback cannot work as a NordVPN tunnel DNS target.
+    if (/^127\./.test(part)) {
       return {
         ok: false,
         servers: [],
-        error: "LAN/private DNS (" + part + ") breaks name resolution while NordVPN is connected. Use a public resolver (1.1.1.1, 8.8.8.8) or DNS Off."
+        error: "DNS cannot be a loopback address (" + part + ")"
       }
     }
     if (out.indexOf(part) < 0) out.push(part)
   }
   if (out.length === 0) return { ok: false, servers: [], error: "Enter at least one DNS server" }
   return { ok: true, servers: out, error: "" }
+}
+
+// Pi-hole / LAN DNS only works over NordVPN if the host (and usually its
+// subnet) is allowlisted before `nordvpn set dns` runs.
+function lanDnsAllowlistCidrs(ip) {
+  if (!isPrivateOrLocalIpv4(ip) || /^127\./.test(ip)) return []
+  var parts = String(ip).trim().split(".")
+  var a = parseInt(parts[0], 10)
+  var b = parseInt(parts[1], 10)
+  var c = parseInt(parts[2], 10)
+  var targets = [ip + "/32"]
+  if (a === 192 && b === 168) targets.push(a + "." + b + "." + c + ".0/24")
+  else if (a === 10) targets.push(a + "." + b + "." + c + ".0/24")
+  else if (a === 172 && b >= 16 && b <= 31) targets.push(a + "." + b + "." + c + ".0/24")
+  return targets
+}
+
+function lanDnsServers(servers) {
+  var out = []
+  for (var i = 0; i < servers.length; i++) {
+    if (isPrivateOrLocalIpv4(servers[i]) && !/^127\./.test(servers[i]))
+      out.push(servers[i])
+  }
+  return out
 }
 
 function dnsMode(value) {

@@ -12,7 +12,7 @@ auto-connect and DNS, keep Tailscale online, and see your live public IP.
 - Connect / disconnect from the bar icon or popup switch
 - Searchable country list for server switching
 - Auto-connect on startup, with an optional preferred country
-- DNS presets (Off, Cloudflare, Google) plus up to three custom **public** IPv4 servers
+- DNS presets (Off, Cloudflare, Google, Pi-hole) plus custom IPv4 servers with automatic LAN allowlisting
 - Optional Tailscale coexistence (allowlists `100.64.0.0/10` and UDP `41641`)
 - Live **Public IP** and **Tailscale** hostname / IP in the popup
 
@@ -86,18 +86,30 @@ nordvpn allowlist add port 41641 protocol UDP
 Those entries are applied when you turn the toggle on and again before connect
 or country switch. Turn the toggle off to remove them.
 
-## DNS safety
+## Pi-hole / LAN DNS
 
-- Prefer **Off**, **Cloudflare**, or **Google**.
-- Custom DNS must be a **public** resolver. LAN addresses such as
-  `192.168.x.x` / `10.x.x.x` are rejected — while NordVPN is connected they
-  usually become unreachable, which looks like a total internet outage.
-- If DNS ever breaks after a change, recover with:
+NordVPN can use your Pi-hole, but the Pi-hole host must be **allowlisted before**
+DNS is changed — otherwise resolution dies over the tunnel.
 
-  ```bash
-  nordvpn set dns off
-  nordvpn disconnect   # if needed
-  ```
+1. Set **Pi-hole DNS address** in the widget settings (for example `192.168.2.2`).
+2. Click **Pi-hole** in the DNS row (or type the IP and **Apply custom DNS**).
+
+The plugin will:
+
+```bash
+nordvpn allowlist add subnet <pihole>/32
+nordvpn allowlist add subnet <pihole-subnet>/24
+nordvpn set dns <pihole>
+```
+
+That order matters. If DNS ever breaks, recover with:
+
+```bash
+nordvpn set dns off
+nordvpn disconnect   # if needed
+```
+
+Public presets (**Off** / **Cloudflare** / **Google**) remain available.
 
 ## Settings
 
@@ -107,6 +119,7 @@ Widget settings (also editable from Omarchy’s plugin settings UI):
 | --- | --- | --- |
 | `refreshIntervalSec` | `5` | Status / settings poll interval (2–60) |
 | `autoConnectCountry` | `""` | Optional country name or code for auto-connect |
+| `piholeDns` | `""` | Pi-hole / LAN DNS IPv4 used by the Pi-hole button |
 | `allowTailscale` | `false` | Opt-in allowlist for Tailscale subnet/port |
 
 ## Validate (maintainers)

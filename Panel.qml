@@ -378,6 +378,9 @@ Panel {
               spacing: Style.space(6)
               readonly property int count: 4
               readonly property real cellWidth: (width - spacing * (count - 1)) / count
+              readonly property bool piholeSelected: nord.dnsServers.length > 0
+                && nord.piholeDns !== ""
+                && nord.dnsServers[0] === nord.piholeDns
 
               Button {
                 width: dnsRow.cellWidth
@@ -414,14 +417,17 @@ Panel {
               }
               Button {
                 width: dnsRow.cellWidth
-                text: "Custom"
-                selected: nord.dnsMode === "custom"
+                text: "Pi-hole"
+                selected: dnsRow.piholeSelected
                 bordered: true
                 foreground: root.foreground
                 fontFamily: root.fontFamily
                 fontSize: Style.font.caption
-                enabled: !nord.unavailable
-                onClicked: dns1Field.forceActiveFocus()
+                enabled: !nord.unavailable && !nord.settingsBusy
+                onClicked: {
+                  if (nord.piholeDns !== "") dns1Field.text = nord.piholeDns
+                  root.applyDnsPreset("pihole")
+                }
               }
             }
 
@@ -441,7 +447,9 @@ Panel {
               width: parent.width
               foreground: root.foreground
               font.family: root.fontFamily
-              placeholderText: "Primary DNS (IPv4)"
+              placeholderText: nord.piholeDns !== ""
+                ? ("Primary DNS (Pi-hole: " + nord.piholeDns + ")")
+                : "Primary DNS / Pi-hole IPv4"
               onAccepted: applyCustomDns()
             }
             TextField {
@@ -473,7 +481,7 @@ Panel {
 
             Text {
               width: parent.width
-              text: "Use public resolvers only (e.g. 1.1.1.1). LAN DNS like 192.168.x.x usually kills resolution while NordVPN is connected. Custom DNS also disables Threat Protection."
+              text: "Pi-hole / LAN DNS is allowlisted automatically before apply so it stays reachable over NordVPN. Set the Pi-hole address in widget settings (piholeDns), then use the Pi-hole button or Apply. Custom DNS disables Threat Protection."
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption

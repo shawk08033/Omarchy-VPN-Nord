@@ -14,10 +14,12 @@ Item {
   onSettingsChanged: {
     root.autoConnectCountry = String(setting("autoConnectCountry", "")).trim()
     root.allowTailscale = setting("allowTailscale", false) === true
+    root.piholeDns = String(setting("piholeDns", "")).trim()
   }
 
   Component.onCompleted: {
     root.allowTailscale = setting("allowTailscale", false) === true
+    root.piholeDns = String(setting("piholeDns", "")).trim()
     root.refreshSettings()
   }
   property string connectionState: "Unknown"
@@ -54,6 +56,8 @@ Item {
   property bool _settingsRefreshPending: false
   property var _allowlistQueue: []
   property bool _allowlistSyncing: false
+  property var _pendingDnsServers: null
+  property string piholeDns: String(setting("piholeDns", "")).trim()
 
   readonly property bool connected: connectionState === "Connected"
   readonly property bool transitioning: connectionState === "Connecting"
@@ -160,7 +164,11 @@ Item {
   function toggle() {
     if (controlProcess.running) return
     _desired = (connected || transitioning) ? 0 : 1
-    if (_desired === 1 && root.allowTailscale) root.ensureTailscaleAllowlist()
+    if (_desired === 1) {
+      if (root.allowTailscale) root.ensureTailscaleAllowlist()
+      // Keep Pi-hole reachable before the tunnel comes up.
+      root.ensureLanDnsAllowlist(root.dnsServers)
+    }
     controlProcess.command = _desired === 1 ? ["nordvpn", "connect"] : ["nordvpn", "disconnect"]
     controlProcess.running = true
   }
@@ -172,14 +180,40 @@ Item {
   }
 
   function drainAllowlistQueue() {
-    if (allowlistProcess.running || root._allowlistQueue.length === 0) {
-      if (!allowlistProcess.running && root._allowlistQueue.length === 0)
-        root._allowlistSyncing = false
+    if (allowlistProcess.running) return
+    if (root._allowlistQueue.length === 0) {
+      root._allowlistSyncing = false
+      root.flushPendingDns()
       return
     }
     root._allowlistSyncing = true
     allowlistProcess.command = root._allowlistQueue.shift()
     allowlistProcess.running = true
+  }
+
+  function flushPendingDns() {
+    if (!root._pendingDnsServers || root._pendingDnsServers.length === 0) return
+    if (dnsProcess.running || root._allowlistSyncing || root._allowlistQueue.length > 0) return
+    var servers = root._pendingDnsServers
+    root._pendingDnsServers = null
+    dnsProcess.command = ["nordvpn", "set", "dns"].concat(servers)
+    dnsProcess.running = true
+  }
+
+  function ensureLanDnsAllowlist(servers) {
+    var lan = Model.lanDnsServers(servers)
+    var blob = root._settingsOutput + "\n" + JSON.stringify(root.vpnSettings)
+    var queued = false
+    for (var i = 0; i < lan.length; i++) {
+      var cidrs = Model.lanDnsAllowlistCidrs(lan[i])
+      for (var j = 0; j < cidrs.length; j++) {
+        if (blob.indexOf(cidrs[j]) !== -1) continue
+        root.enqueueAllowlist(["nordvpn", "allowlist", "add", "subnet", cidrs[j]])
+        blob += "\n" + cidrs[j]
+        queued = true
+      }
+    }
+    return queued
   }
 
   function ensureTailscaleAllowlist() {
@@ -205,6 +239,7 @@ Item {
     if (!value || setCountryProcess.running) return
     // Only touch the allowlist when the user opted in; never on a timer poll.
     if (root.allowTailscale) root.ensureTailscaleAllowlist()
+    root.ensureLanDnsAllowlist(root.dnsServers)
     setCountryProcess.command = ["nordvpn", "connect", value]
     setCountryProcess.running = true
   }
@@ -242,12 +277,13 @@ Item {
 
   function setDnsOff() {
     if (dnsProcess.running) return
+    root._pendingDnsServers = null
     dnsProcess.command = ["nordvpn", "set", "dns", "off"]
     dnsProcess.running = true
   }
 
   function setDnsServers(servers) {
-    if (dnsProcess.running) return
+    if (dnsProcess.running || root._allowlistSyncing) return
     var normalized = Model.normalizeDnsServers(servers)
     if (!normalized.ok) {
       root.settingsError = normalized.error
@@ -255,8 +291,16 @@ Item {
       actionStatusTimer.restart()
       return
     }
-    dnsProcess.command = ["nordvpn", "set", "dns"].concat(normalized.servers)
-    dnsProcess.running = true
+    // Pi-hole / LAN DNS: allowlist the resolver first, then set DNS.
+    // Setting DNS before allowlisting is what drops the network over VPN.
+    root._pendingDnsServers = normalized.servers.slice()
+    var queued = root.ensureLanDnsAllowlist(normalized.servers)
+    if (!queued) root.flushPendingDns()
+    else {
+      root.actionStatus = "Allowlisting LAN DNS, then applying…"
+      actionStatusTimer.restart()
+      root.drainAllowlistQueue()
+    }
   }
 
   function setDnsPreset(preset) {
@@ -271,6 +315,16 @@ Item {
     if (preset === "google") {
       root.setDnsServers(["8.8.8.8", "8.8.4.4"])
       return
+    }
+    if (preset === "pihole") {
+      var ip = String(root.piholeDns || "").trim()
+      if (!Model.isIpv4(ip)) {
+        root.settingsError = "Set Pi-hole DNS address in widget settings first"
+        root.actionStatus = root.settingsError
+        actionStatusTimer.restart()
+        return
+      }
+      root.setDnsServers([ip])
     }
   }
 
