@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "id": "shaunhawk.nordvpn",
+  "name": "NordVPN",
+  "version": "1.1.0",
+  "author": "Shaun Hawk <shaun@shaunhawk.com>",
+  "license": "MIT",
+  "description": "Control NordVPN from the Omarchy bar: connect, switch servers, auto-connect, custom DNS, and Tailscale coexistence.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "NordVPN",
+    "description": "Toggle NordVPN, pick a country, set auto-connect, choose custom DNS, and allowlist Tailscale.",
+    "category": "Network",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 5,
+      "autoConnectCountry": "",
+      "allowTailscale": true
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 2,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 5
+      },
+      {
+        "key": "autoConnectCountry",
+        "type": "string",
+        "label": "Auto-connect country",
+        "description": "Optional country name or two-letter code used when auto-connect is enabled (for example United States or us).",
+        "defaultValue": ""
+      },
+      {
+        "key": "allowTailscale",
+        "type": "boolean",
+        "label": "Allow Tailscale alongside NordVPN",
+        "description": "Allowlists Tailscale's 100.64.0.0/10 subnet and UDP 41641 so both can stay connected.",
+        "defaultValue": true
+      }
+    ]
+  }
+}
