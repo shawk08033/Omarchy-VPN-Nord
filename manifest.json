@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "shaunhawk.nordvpn",
   "name": "NordVPN",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "author": "Shaun Hawk <shaun@shaunhawk.com>",
   "license": "MIT",
   "description": "Control NordVPN from the Omarchy bar: connect, switch servers, auto-connect, custom DNS, Tailscale coexistence, and live IP status.",
@@ -19,7 +19,7 @@
     "defaults": {
       "refreshIntervalSec": 5,
       "autoConnectCountry": "",
-      "allowTailscale": true
+      "allowTailscale": false
     },
     "schema": [
       {
@@ -42,8 +42,8 @@
         "key": "allowTailscale",
         "type": "boolean",
         "label": "Allow Tailscale alongside NordVPN",
-        "description": "Allowlists Tailscale's 100.64.0.0/10 subnet and UDP 41641 so both can stay connected.",
-        "defaultValue": true
+        "description": "Opt-in: allowlists Tailscale's 100.64.0.0/10 subnet and UDP 41641 when enabled. Use public DNS (not LAN resolvers) while NordVPN is connected.",
+        "defaultValue": false
       }
     ]
   }

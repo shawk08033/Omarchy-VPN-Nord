@@ -473,7 +473,7 @@ Panel {
 
             Text {
               width: parent.width
-              text: "Custom DNS disables NordVPN Threat Protection. Up to three IPv4 servers."
+              text: "Use public resolvers only (e.g. 1.1.1.1). LAN DNS like 192.168.x.x usually kills resolution while NordVPN is connected. Custom DNS also disables Threat Protection."
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption

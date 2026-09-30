@@ -9,15 +9,15 @@ Item {
 
   property var settings: ({})
   property string autoConnectCountry: String(setting("autoConnectCountry", "")).trim()
-  property bool allowTailscale: true
+  property bool allowTailscale: false
 
   onSettingsChanged: {
     root.autoConnectCountry = String(setting("autoConnectCountry", "")).trim()
-    root.allowTailscale = setting("allowTailscale", true) !== false
+    root.allowTailscale = setting("allowTailscale", false) === true
   }
 
   Component.onCompleted: {
-    root.allowTailscale = setting("allowTailscale", true) !== false
+    root.allowTailscale = setting("allowTailscale", false) === true
     root.refreshSettings()
   }
   property string connectionState: "Unknown"
@@ -201,16 +201,9 @@ Item {
     else root.clearTailscaleAllowlist()
   }
 
-  function syncTailscaleAllowlist() {
-    if (!root._settingsInitialized || !root.allowTailscale) return
-    if (root.tailscaleAllowlisted
-      && Model.hasTailscalePort(root._settingsOutput + JSON.stringify(root.vpnSettings)))
-      return
-    root.ensureTailscaleAllowlist()
-  }
-
   function setCountry(value) {
     if (!value || setCountryProcess.running) return
+    // Only touch the allowlist when the user opted in; never on a timer poll.
     if (root.allowTailscale) root.ensureTailscaleAllowlist()
     setCountryProcess.command = ["nordvpn", "connect", value]
     setCountryProcess.running = true
@@ -431,7 +424,6 @@ Item {
         root.settingsError = ""
         root._settingsInitialized = true
         root.syncAutoConnectCountry()
-        root.syncTailscaleAllowlist()
       } else {
         root.settingsError = "NordVPN settings unavailable"
         root._settingsInitialized = false

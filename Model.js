@@ -92,6 +92,22 @@ function isIpv4(value) {
   return true
 }
 
+// LAN / CGNAT resolvers usually become unreachable once NordVPN is up
+// (unless carefully allowlisted), which looks like a total internet outage.
+function isPrivateOrLocalIpv4(value) {
+  if (!isIpv4(value)) return false
+  var parts = String(value).trim().split(".")
+  var a = parseInt(parts[0], 10)
+  var b = parseInt(parts[1], 10)
+  if (a === 10) return true
+  if (a === 127) return true
+  if (a === 169 && b === 254) return true
+  if (a === 192 && b === 168) return true
+  if (a === 172 && b >= 16 && b <= 31) return true
+  if (a === 100 && b >= 64 && b <= 127) return true
+  return false
+}
+
 function parseDnsServers(value) {
   var raw = String(value || "").trim()
   if (raw === "" || /^(disabled|off|false|0)$/i.test(raw)) return []
@@ -110,6 +126,13 @@ function normalizeDnsServers(values) {
     var part = String(values[i] || "").trim()
     if (part === "") continue
     if (!isIpv4(part)) return { ok: false, servers: [], error: "DNS servers must be IPv4 addresses" }
+    if (isPrivateOrLocalIpv4(part)) {
+      return {
+        ok: false,
+        servers: [],
+        error: "LAN/private DNS (" + part + ") breaks name resolution while NordVPN is connected. Use a public resolver (1.1.1.1, 8.8.8.8) or DNS Off."
+      }
+    }
     if (out.indexOf(part) < 0) out.push(part)
   }
   if (out.length === 0) return { ok: false, servers: [], error: "Enter at least one DNS server" }
