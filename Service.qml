@@ -541,7 +541,8 @@ Item {
 
   Process {
     id: publicIpProcess
-    command: ["curl", "-4", "-fsS", "--max-time", "3", "https://api.ipify.org"]
+    // Cap body size: --max-time alone does not bound StdioCollector memory.
+    command: ["curl", "-4", "-fsS", "--max-time", "3", "--max-filesize", "64", "https://api.ipify.org"]
     stdout: StdioCollector { id: publicIpStdout; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {

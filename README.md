@@ -143,8 +143,9 @@ omarchy plugin remove shaunhawk.nordvpn --yes
   tunnels are handled by the daemon; use NordVPN’s own Kill Switch for hard
   network blocking when the VPN is down.
 - Setting custom DNS disables NordVPN Threat Protection in the client.
-- Public IP is fetched from `https://api.ipify.org` (shows the current egress
-  IP, including the NordVPN exit IP when connected).
+- Public IP is fetched from `https://api.ipify.org` with a 3s timeout and a
+  64-byte `--max-filesize` cap (shows the current egress IP, including the
+  NordVPN exit IP when connected).
 
 ## License
 

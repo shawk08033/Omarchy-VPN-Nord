@@ -267,7 +267,10 @@ function elide(text) {
 }
 
 function parsePublicIp(raw) {
-  var value = String(raw || "").replace(/\s+/g, "").trim()
+  var text = String(raw || "")
+  // Defense in depth: never keep or scan an oversized body (IPv4/IPv6 fit in << 64).
+  if (text.length > 64) return ""
+  var value = text.replace(/\s+/g, "").trim()
   if (isIpv4(value)) return value
   // Accept a bare IPv6 address without validating every form.
   if (/^[0-9a-f:]+$/i.test(value) && value.indexOf(":") !== -1) return value

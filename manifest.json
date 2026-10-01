@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "shaunhawk.nordvpn",
   "name": "NordVPN",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "author": "Shaun Hawk <shaun@shaunhawk.com>",
   "license": "MIT",
   "description": "Control NordVPN from the Omarchy bar: connect, switch countries/cities, auto-connect, Pi-hole/custom DNS, Tailscale coexistence, and live IP status.",
